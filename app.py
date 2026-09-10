@@ -6,26 +6,114 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 
 
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
 st.set_page_config(
     page_title="HR Policy Assistant",
-    page_icon="📋",
+    page_icon="👩‍💼",
     layout="wide"
 )
 
 
-st.title("📋 HR Policy Assistant")
-st.write(
-    "Upload an HR policy PDF and ask questions about its contents."
+# =========================================================
+# CUSTOM CSS
+# =========================================================
+
+st.markdown(
+    """
+    <style>
+
+    .main-title {
+        font-size: 42px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+
+    .subtitle {
+        font-size: 18px;
+        color: #666666;
+        margin-bottom: 25px;
+    }
+
+    .section-title {
+        font-size: 27px;
+        font-weight: 650;
+        margin-top: 15px;
+        margin-bottom: 12px;
+    }
+
+    .success-box {
+        padding: 14px;
+        border-radius: 10px;
+        background-color: #e8f8f0;
+        border: 1px solid #b7e4cd;
+        color: #176b45;
+        font-weight: 600;
+    }
+
+    .answer-box {
+        padding: 20px;
+        border-radius: 12px;
+        background-color: #f5f7fb;
+        border: 1px solid #dfe4ee;
+        margin-top: 10px;
+    }
+
+    .source-box {
+        padding: 12px;
+        border-radius: 10px;
+        background-color: #fafafa;
+        border: 1px solid #e3e3e3;
+    }
+
+    .workflow-item {
+        margin-bottom: 8px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
+# =========================================================
+# TITLE
+# =========================================================
+
+st.markdown(
+    '<div class="main-title">👩‍💼 HR Policy Assistant</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">'
+    'Ask questions about your company HR policy using '
+    'Retrieval-Augmented Generation (RAG).'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+
+# =========================================================
+# LOAD SENTENCE TRANSFORMER
+# =========================================================
+
 @st.cache_resource
 def load_embedding_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+
+    return SentenceTransformer(
+        "all-MiniLM-L6-v2"
+    )
 
 
 embedding_model = load_embedding_model()
 
+
+# =========================================================
+# PDF TEXT EXTRACTION
+# =========================================================
 
 def extract_text_from_pdf(pdf_file):
 
@@ -38,23 +126,36 @@ def extract_text_from_pdf(pdf_file):
 
     pages = []
 
-    for page_number, page in enumerate(document, start=1):
+    for page_number, page in enumerate(
+        document,
+        start=1
+    ):
 
         text = page.get_text("text")
 
         if text.strip():
 
-            pages.append({
-                "page": page_number,
-                "text": text.strip()
-            })
+            pages.append(
+                {
+                    "page": page_number,
+                    "text": text.strip()
+                }
+            )
 
     document.close()
 
     return pages
 
 
-def create_chunks(pages, chunk_size=800, overlap=150):
+# =========================================================
+# TEXT CHUNKING
+# =========================================================
+
+def create_chunks(
+    pages,
+    chunk_size=800,
+    overlap=150
+):
 
     chunks = []
 
@@ -69,19 +170,27 @@ def create_chunks(pages, chunk_size=800, overlap=150):
 
             end = start + chunk_size
 
-            chunk_text = text[start:end].strip()
+            chunk_text = text[
+                start:end
+            ].strip()
 
             if chunk_text:
 
-                chunks.append({
-                    "text": chunk_text,
-                    "page": page_number
-                })
+                chunks.append(
+                    {
+                        "text": chunk_text,
+                        "page": page_number
+                    }
+                )
 
             start += chunk_size - overlap
 
     return chunks
 
+
+# =========================================================
+# CREATE FAISS INDEX
+# =========================================================
 
 def create_faiss_index(chunks):
 
@@ -96,37 +205,54 @@ def create_faiss_index(chunks):
         normalize_embeddings=True
     )
 
-    embeddings = embeddings.astype("float32")
+    embeddings = embeddings.astype(
+        "float32"
+    )
 
     dimension = embeddings.shape[1]
 
-    index = faiss.IndexFlatIP(dimension)
+    index = faiss.IndexFlatIP(
+        dimension
+    )
 
     index.add(embeddings)
 
     return index
 
 
+# =========================================================
+# SEARCH POLICY
+# =========================================================
+
 def search_policy(
     question,
     index,
     chunks,
-    top_k=5
+    top_k
 ):
 
-    question_embedding = embedding_model.encode(
-        [question],
-        convert_to_numpy=True,
-        normalize_embeddings=True
+    question_embedding = (
+        embedding_model.encode(
+            [question],
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )
     )
 
-    question_embedding = question_embedding.astype(
-        "float32"
+    question_embedding = (
+        question_embedding.astype(
+            "float32"
+        )
+    )
+
+    number_of_results = min(
+        top_k,
+        len(chunks)
     )
 
     scores, indices = index.search(
         question_embedding,
-        min(top_k, len(chunks))
+        number_of_results
     )
 
     results = []
@@ -139,27 +265,40 @@ def search_policy(
         if index_number == -1:
             continue
 
-        result = chunks[index_number].copy()
+        result = chunks[
+            index_number
+        ].copy()
 
-        result["score"] = float(score)
+        result["score"] = float(
+            score
+        )
 
         results.append(result)
 
     return results
 
 
+# =========================================================
+# GROQ ANSWER
+# =========================================================
+
 def generate_answer(
     question,
     search_results
 ):
 
-    api_key = st.secrets.get("GROQ_API_KEY")
+    # API key is NOT shown in the UI.
+    # It is read securely from Streamlit Secrets.
+
+    api_key = st.secrets.get(
+        "GROQ_API_KEY"
+    )
 
     if not api_key:
 
         raise ValueError(
-            "GROQ_API_KEY is not configured. "
-            "Add it in Streamlit Cloud Secrets."
+            "GROQ_API_KEY is missing. "
+            "Please add it in Streamlit Cloud Secrets."
         )
 
     client = Groq(
@@ -182,17 +321,21 @@ def generate_answer(
     system_prompt = """
 You are an HR Policy Assistant.
 
-Answer questions ONLY using the provided HR policy context.
+Your task is to answer questions using ONLY
+the HR policy context provided to you.
 
-Rules:
+IMPORTANT RULES:
 
-1. Do not invent HR policies.
-2. If the answer is not in the context, say:
-"I could not find this information in the uploaded HR policy."
-3. Give a clear and professional answer.
-4. Mention the relevant page number when possible.
-5. Do not use general HR knowledge as if it came from the document.
-6. Keep answers concise but useful.
+1. Never invent an HR policy.
+2. Never guess information that is not in the document.
+3. If the answer cannot be found in the uploaded
+   HR policy, say:
+   "I could not find this information in the uploaded HR policy."
+4. Give clear and professional answers.
+5. Mention the relevant page number when possible.
+6. Do not use general HR knowledge as if it came
+   from the uploaded policy.
+7. Keep the answer concise but helpful.
 """
 
     user_prompt = f"""
@@ -200,12 +343,16 @@ HR POLICY CONTEXT:
 
 {context}
 
+
 USER QUESTION:
 
 {question}
 
-Answer using only the HR policy context.
-Mention relevant page numbers when possible.
+
+Answer the user's question using ONLY the
+HR policy context above.
+
+Mention the relevant page number when possible.
 """
 
     response = client.chat.completions.create(
@@ -224,15 +371,58 @@ Mention relevant page numbers when possible.
         max_tokens=700
     )
 
-    return response.choices[0].message.content
+    return response.choices[
+        0
+    ].message.content
 
+
+# =========================================================
+# SIDEBAR
+# =========================================================
 
 with st.sidebar:
 
-    st.header("⚙️ Settings")
+    st.header("📚 How it works")
+
+    st.markdown(
+        """
+        <div class="workflow-item">
+        <b>1.</b> Upload an HR Policy PDF
+        </div>
+
+        <div class="workflow-item">
+        <b>2.</b> Extract text from the PDF
+        </div>
+
+        <div class="workflow-item">
+        <b>3.</b> Split text into chunks
+        </div>
+
+        <div class="workflow-item">
+        <b>4.</b> Generate embeddings
+        </div>
+
+        <div class="workflow-item">
+        <b>5.</b> Store embeddings in FAISS
+        </div>
+
+        <div class="workflow-item">
+        <b>6.</b> Retrieve relevant policy sections
+        </div>
+
+        <div class="workflow-item">
+        <b>7.</b> Generate an answer using Groq
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("---")
+
+    st.header("🔎 Search Settings")
 
     top_k = st.slider(
-        "Relevant sections",
+        "Relevant policy sections",
         min_value=1,
         max_value=8,
         value=5
@@ -241,28 +431,42 @@ with st.sidebar:
     st.markdown("---")
 
     st.info(
-        "Upload an HR policy PDF and ask questions "
-        "about leave, attendance, working hours, "
-        "benefits, conduct, or company rules."
+        "The assistant answers questions based "
+        "on the uploaded HR policy."
     )
 
 
+# =========================================================
+# UPLOAD SECTION
+# =========================================================
+
+st.markdown(
+    '<div class="section-title">📄 Upload HR Policy</div>',
+    unsafe_allow_html=True
+)
+
 uploaded_file = st.file_uploader(
-    "📄 Upload HR Policy PDF",
+    "Upload your HR Policy PDF",
     type=["pdf"]
 )
 
 
+# =========================================================
+# PROCESS PDF
+# =========================================================
+
 if uploaded_file:
 
     if (
-        "processed_file_name" not in st.session_state
-        or st.session_state.processed_file_name
+        "processed_file_name"
+        not in st.session_state
+        or
+        st.session_state.processed_file_name
         != uploaded_file.name
     ):
 
         with st.spinner(
-            "Reading and indexing the HR policy..."
+            "Processing HR Policy..."
         ):
 
             try:
@@ -275,7 +479,8 @@ if uploaded_file:
 
                     st.error(
                         "No readable text was found "
-                        "in this PDF."
+                        "in this PDF. Please upload "
+                        "a text-based PDF."
                     )
 
                     st.stop()
@@ -287,7 +492,8 @@ if uploaded_file:
                 if not chunks:
 
                     st.error(
-                        "Could not create text chunks."
+                        "Could not create searchable "
+                        "chunks from the PDF."
                     )
 
                     st.stop()
@@ -297,16 +503,19 @@ if uploaded_file:
                 )
 
                 st.session_state.pages = pages
+
                 st.session_state.chunks = chunks
+
                 st.session_state.index = index
+
                 st.session_state.processed_file_name = (
                     uploaded_file.name
                 )
 
-            except Exception as e:
+            except Exception as error:
 
                 st.error(
-                    f"Error while processing PDF: {e}"
+                    f"Error processing PDF: {error}"
                 )
 
                 st.stop()
@@ -314,54 +523,150 @@ if uploaded_file:
     else:
 
         pages = st.session_state.pages
+
         chunks = st.session_state.chunks
+
         index = st.session_state.index
 
 
-    st.success(
-        f"✅ Policy loaded: {uploaded_file.name}"
+    # =====================================================
+    # SUCCESS MESSAGE
+    # =====================================================
+
+    st.markdown(
+        f"""
+        <div class="success-box">
+        ✅ HR Policy processed successfully!
+        Created {len(chunks)} searchable chunks.
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
-    col1, col2 = st.columns(2)
+    st.write("")
+
+
+    # =====================================================
+    # METRICS
+    # =====================================================
+
+    col1, col2, col3 = st.columns(3)
 
     with col1:
 
         st.metric(
-            "Pages",
+            "📄 Pages",
             len(pages)
         )
 
     with col2:
 
         st.metric(
-            "Text chunks",
+            "🧩 Searchable Chunks",
             len(chunks)
+        )
+
+    with col3:
+
+        st.metric(
+            "🔎 Retrieved Sections",
+            top_k
         )
 
 
     st.markdown("---")
 
 
-    st.subheader(
-        "💬 Ask about the HR policy"
+    # =====================================================
+    # EXAMPLE QUESTIONS
+    # =====================================================
+
+    st.markdown(
+        '<div class="section-title">💡 Example Questions</div>',
+        unsafe_allow_html=True
     )
+
+    question_col1, question_col2, question_col3 = (
+        st.columns(3)
+    )
+
+    example_questions = [
+        "How many annual leave days are employees entitled to?",
+        "What is the notice period?",
+        "Can employees work remotely?"
+    ]
+
+    with question_col1:
+
+        example_1 = st.button(
+            "📅 Annual Leave",
+            use_container_width=True
+        )
+
+    with question_col2:
+
+        example_2 = st.button(
+            "📋 Notice Period",
+            use_container_width=True
+        )
+
+    with question_col3:
+
+        example_3 = st.button(
+            "🏠 Remote Work",
+            use_container_width=True
+        )
+
+
+    # =====================================================
+    # QUESTION INPUT
+    # =====================================================
+
+    if example_1:
+
+        st.session_state.question = (
+            example_questions[0]
+        )
+
+    if example_2:
+
+        st.session_state.question = (
+            example_questions[1]
+        )
+
+    if example_3:
+
+        st.session_state.question = (
+            example_questions[2]
+        )
+
+
+    if "question" not in st.session_state:
+
+        st.session_state.question = ""
 
 
     question = st.text_input(
-        "Enter your question",
+        "💬 Ask a question about the policy",
+        value=st.session_state.question,
         placeholder=(
             "Example: How many annual leaves "
-            "are employees allowed?"
+            "are employees entitled to?"
         )
     )
 
 
     ask_button = st.button(
-        "🔎 Ask Question",
-        type="primary"
+        "🔎 Ask HR Policy",
+        type="primary",
+        use_container_width=True
     )
 
+
+    # =====================================================
+    # ANSWER
+    # =====================================================
 
     if ask_button:
 
@@ -374,7 +679,7 @@ if uploaded_file:
         else:
 
             with st.spinner(
-                "Searching the HR policy..."
+                "🔎 Searching relevant policy sections..."
             ):
 
                 try:
@@ -386,17 +691,17 @@ if uploaded_file:
                         top_k
                     )
 
-                except Exception as e:
+                except Exception as error:
 
                     st.error(
-                        f"Search error: {e}"
+                        f"Search error: {error}"
                     )
 
                     st.stop()
 
 
             with st.spinner(
-                "Generating answer..."
+                "🤖 Generating HR policy answer..."
             ):
 
                 try:
@@ -406,28 +711,44 @@ if uploaded_file:
                         search_results
                     )
 
-                except Exception as e:
+                except Exception as error:
 
                     st.error(
-                        f"AI error: {e}"
+                        f"AI error: {error}"
                     )
 
                     st.stop()
 
 
-            st.subheader(
-                "🤖 Answer"
+            # =================================================
+            # ANSWER DISPLAY
+            # =================================================
+
+            st.markdown(
+                '<div class="section-title">🤖 Answer</div>',
+                unsafe_allow_html=True
             )
 
-            st.markdown(answer)
+            st.markdown(
+                f"""
+                <div class="answer-box">
+                {answer}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
+
+            # =================================================
+            # SOURCES
+            # =================================================
 
             st.markdown("---")
 
-            st.subheader(
-                "📚 Retrieved Policy Sections"
+            st.markdown(
+                '<div class="section-title">📚 Retrieved Policy Sections</div>',
+                unsafe_allow_html=True
             )
-
 
             for number, result in enumerate(
                 search_results,
@@ -435,8 +756,7 @@ if uploaded_file:
             ):
 
                 with st.expander(
-                    f"Source {number} — "
-                    f"Page {result['page']}"
+                    f"📄 Source {number} — Page {result['page']}"
                 ):
 
                     st.write(
@@ -452,9 +772,13 @@ if uploaded_file:
 else:
 
     st.info(
-        "👆 Upload an HR policy PDF to get started."
+        "👆 Upload an HR Policy PDF to get started."
     )
 
+
+# =========================================================
+# FOOTER
+# =========================================================
 
 st.markdown("---")
 
