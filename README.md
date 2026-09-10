@@ -22,11 +22,10 @@ Upload an HR policy PDF and ask questions about its contents.
 - Sentence Transformers
 - PyMuPDF
 - Groq
-- NumPy
+- Numpy
+  ## 🔗 Live Demo
 
-## 🔗 Live Demo
-
-Add your Streamlit app link here after deployment.
+[Open HR Policy Assistant](https://main-live-demo-iakdb38zzasrds7xuvg5tc.streamlit.app/)
 
 ## 📌 How It Works
 
